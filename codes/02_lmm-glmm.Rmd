@@ -1,0 +1,229 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+<https://www.youtube.com/watch?v=wfUWJfO3PIU&ab_channel=DerekCorcoran>
+
+# Packages
+
+```{r Packages}
+
+library(tidyverse)
+library(broom.mixed)
+library(lme4)
+library(nlme)
+
+data("CO2")
+
+attach(CO2)
+glimpse(CO2)
+
+```
+
+### Importante
+
+Existen distintos paquetes para ajustar modelos lineales mixtos (LMM) tales como `lme4` y `nlme`, los cuales presentan distintas *lexicolog?as*. Ambos paquetes son v?lidos, en este practico se revisara el metodo del paquete `lme4` el cual incluye las variables aleatorias en conjunto con la formula.
+
+# Modelos Lineales Mixtos (LMM)
+
+```{r}
+
+ggplot(
+  data = CO2,
+  aes(
+    x = conc, 
+    y = uptake,
+    color = Treatment
+    )
+) +
+  geom_point() +
+  geom_path(aes(group = Plant)) +
+  facet_wrap(~ Type) +
+  theme_bw()
+
+```
+
+Se espera que la identidad de la planta NO explique la captación de CO2. de manera predecible. Es decir, una variable aleatoria.
+
+## Modelacion
+
+```{r LMM}
+
+# Modelo Lineal General
+(Fit1 <- lm(
+  formula = uptake ~ conc + Type + Treatment,
+  data = CO2
+))
+
+# Modelo Lineal Mixto (LMM)
+(Fit2 <- nlme::lme(
+  fixed = uptake ~ conc + Type  + Treatment,
+  random = ~ 1 + conc|Plant,
+  data = CO2
+))
+
+(Fit2 <- lme4::lmer(
+  formula = uptake ~ conc + Type  + Treatment + (1 + conc|Plant),
+  data = CO2
+))
+
+```
+
+```{r broom.mixed}
+
+# Evalución de las métricas de ajuste del modelo
+glance(Fit2)
+
+# Evaluación de los parámetros del modelo
+tidy(Fit2)
+
+# Evaluación de las observaciones del modelo
+augment(Fit2)
+```
+
+```{r Visualization}
+
+augment(Fit3) %>% 
+  ggplot(
+  aes(
+    x = conc, 
+    y = .fitted,
+    color = Treatment
+    )
+) +
+  geom_point() +
+  geom_path(aes(group = Plant)) +
+  facet_wrap(~ Type) +
+  theme_bw()
+
+```
+
+## *And if a logaritmic behaviour is added?*
+
+Tambien podemos agregar comportamientos (logaritmicos, exponenciales, polinomiales, etc) en los modelos mixtos debido a que estos se encuentran inmersos en el componente fijo del modelo.
+
+```{r LMM c/ comportamiento logaritmico}
+
+# LMM
+(Fit3 <- lmer(
+  formula = uptake ~ conc + I(log(conc)) + Type + Treatment + (1 + conc | Plant), 
+  data = CO2
+))
+
+```
+
+## *And an interaction?*
+
+```{r}
+
+(Fit4 <- lmer(
+  formula = uptake ~ conc + I(log(conc)) + Type:Treatment + (1 + conc | Plant),
+  data = CO2
+))
+
+```
+
+### Lexicología
+
+*What are the meanings of the different ways of writing the model formula?*
+
+##### "\|": LMM
+
+-   `(1|Plant)` : The model considers that the different groupings by `Plant` provokes a different "starting point" for the regression lines so the **intercept** is different.
+
+-   `(conc|Plant)` = `(1 + conc|Plant)`: This time, along with the different **intercepts**, the model acknowledges that the effect of the `conc` variable in the response varies along with `Plant` so the `slope` is different.
+
+-   `(0 + conc|Plant)` : If we want to incorporate a variation in the `slope` but not in the `intercept` then we have to explicitily say so in the model formula with a `0` .
+
+##### ":" y "\*": Interactions (3 Introduccion a los GLM.R)
+
+-   `Time + Diet` : Las lineas de regresion presentan **distinto intercepto pero igual pendiente.**
+
+-   `Time + Diet:Time` : El modelo plantea que el efecto de la variable `Time` varia (solo) segun `Diet`. Esto provoca que las lineas de regresion presenten **igual intercept variando solo la pendiente.**
+
+-   `Diet * Time` = `Time + Diet + Diet:Time` : El agregar la variable `Diet` adem?s de la interaccion `Diet:Time` provoca que las lineas de regresion **varien tanto en el intercept como en la pendiente.**
+
+# Modelos Lineales Mixtos Generalizados (GLMM)
+
+En el caso de que los supuestos del modelo lineal no se cumplan podemos emplear una función link que permita trabajar con variables respuesta de otra distribución de datos y adherir esto a un LMM.
+
+Se estima que el individuo `Chick` puede presentar una variabilidad asociada que puede ser incluida como variable aleatoria. Esto es gracias a que se presentan repeticiones en el individuo, si sólo existiera un valor sin repeticiones esto no permitiría incluir la variable en cuestión como variable aleatoria.
+
+```{r}
+
+# Datos
+data("ChickWeight")
+
+glimpse(ChickWeight)
+attach(ChickWeight)
+
+# Modelación
+(Fit2_poisson <- glmer(
+  formula = weight ~ Diet:Time + (1 + Time | Chick),
+  data = ChickWeight,
+  family = poisson
+))
+
+```
+
+```{r}
+
+glance(Fit2_poisson)
+
+tidy(Fit2_poisson)
+
+```
+
+```{r}
+
+Fit2_poisson %>% 
+  augment() %>% 
+  ggplot(aes(x = Time, y = .fitted, color = Chick)) +
+  geom_point() +
+  geom_path(group = Chick)
+
+```
+
+## *Random variables with variation only in the slopes*
+
+We have to say it explicitly with the number `0`.
+
+```{r}
+
+lme(
+  fixed = I(log(altura)) ~ I(1/sqrt(dap)),
+  random = ~ 0 + dap|rodal,
+  data = data_selected
+) %>% summary()
+
+lmer(
+  formula = I(log(altura)) ~ I(1/sqrt(dap)) + (0 + dap|rodal),
+  data = data_selected
+) %>% summary()
+
+```
+
+## *How to obtain the Variance of the random variable?*
+
+```{r}
+
+glimpse(model)
+
+summary(model)$varcor$random variable[1,1]
+
+model %>% summary() %>% pluck("varcor", "random_variable", 1, 1)
+
+```
+
+## *How to obtain the Intraclass Correlation Coefficient (ICC)?*
+
+```{r}
+
+library(performance)
+
+performance::icc()
+
+model %>% icc() %>% pluck("ICC_adjusted")
+
+```
